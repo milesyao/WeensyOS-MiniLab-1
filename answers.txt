@@ -1,10 +1,137 @@
-Name:
-UCLA ID:
+Name: Chunnan Yao
+UCLA ID: 204568002
 
 
 -------------------------------------------------------------------------------
 
 Response to Exercise 1:
+Yes, sys_getpid() call will return correct value because sys_getpid() only puts current process A's pid into %eax. schedule() function is used to change the current process from process A to another process B that the kernel will be handling right after. As defined in mpos-kern.h, processes have their own registers and so the value of A's %eax and B's %eax will not interfere with each other. 
+
+Response to Excercise 2:
+
+static pid_t
+do_fork(process_t *parent)
+{
+        int i;
+        //step1: scan every entry(except for 0) of proc_array to find a process slot that is available (P_EMPTY)
+        for(i=1; i<NPROCS; i++) {
+                if(proc_array[i].p_state == P_EMPTY) break;
+        }
+        //if we can't find an available process slot, returning -1, which tells the user fork has failed.
+        if(i==NPROCS) return -1;
+        //step2: copy the currnet process's register content to its child
+        proc_array[i].p_registers = parent->p_registers;
+        //step3: copy stack content
+        copy_stack(&proc_array[i], parent);
+        //step4: change the child's process state to "runnable" so that child process will run
+        proc_array[i].p_state = P_RUNNABLE;
+        //step5: For child process, fork just returns 0
+        proc_array[i].p_registers.reg_eax = 0;
+        //step6: For current process, fork returns child's pid.
+        return proc_array[i].p_pid;
+}
+
+static void
+copy_stack(process_t *dest, process_t *src)
+{
+		//As described in the memory map, the key to implement copy_stack is to calculate 
+		//both dest process and src process's stack top & bottom, and use memcpy to make a 
+		//copy of src to dest. Moreover, dest process's %esp register should be set to the 
+		//bottom of its stack in order to make it confront to OS desgin principle.
+
+        uint32_t src_stack_bottom, src_stack_top;
+        uint32_t dest_stack_bottom, dest_stack_top;
+
+		src_stack_top = src->p_pid * PROC_STACK_SIZE + PROC1_STACK_ADDR; /* YOUR CODE HERE */;
+        src_stack_bottom = src->p_registers.reg_esp;
+        uint32_t  stack_size = src_stack_top - src_stack_bottom;
+        dest_stack_top = dest->p_pid * PROC_STACK_SIZE + PROC1_STACK_ADDR; /* YOUR CODE HERE: calculate based on the
+                         other variables */
+        dest_stack_bottom = dest_stack_top - stack_size;
+        memcpy((void *)dest_stack_bottom, (void *)src_stack_bottom, (size_t)stack_size + 1);
+        dest->p_registers.reg_esp = dest_stack_bottom;
+        // YOUR CODE HERE: memcpy the stack and set dest->p_registers.reg_esp               
+
+
+Response to Excercise 3/4:
+in file mpos-kern.h:
+
+//Add filed "waiting_pid" to struct "process" so that every process knows if it is waiting for some other process
+//And the pid of that process
+typedef struct process {
+        pid_t p_pid;                    // Process ID
+
+        registers_t p_registers;        // Current process state: registers,
+                                        // stack location, EIP, etc.
+                                        // 'registers_t' defined in x86.h
+        procstate_t p_state;            // Process state; see above
+        int p_exit_status;              // Process's exit status (if it has
+                                        // exited and p_state == P_ZOMBIE)
+        pid_t waiting_pid;              // the pid that the current process is waiting for
+} process_t;
+
+in file mpos-kern.c:
+
+ case INT_SYS_EXIT:
+ 		//change curren process's status to zombie, indicating that it has exited
+        current->p_state = P_ZOMBIE;
+        int i;
+        //scan all processes to find the processes that are waiting for current process
+        //Once found, unblock them, recycle current process for future use, update current process's exit status
+        //Also send its exit status to those waiting for current process as their return value of sys_wait()
+        //function. Finally, set waiting processes' waiting_pid filed to default(0), because they no longer wait 
+        //for current process.
+        for(i=1; i<NPROCS; i++) {
+                if(proc_array[i].waiting_pid == current->p_pid) {
+                        proc_array[i].p_state = P_RUNNABLE;
+                        current->p_state = P_EMPTY;
+                        current->p_exit_status = current->p_registers.reg_eax;
+                        proc_array[i].p_registers.reg_eax = current->p_exit_status;
+                        proc_array[i].waiting_pid = 0;
+                }
+
+        }
+        schedule();
+ case INT_SYS_WAIT: {
+		//get input---- id of the process that the current process wants to wait for
+        pid_t p = current->p_registers.reg_eax;
+        // If pid is invalid or the aimed process is empty, there is no need to wait for them. sys_wait() directly returns -1, reporting that wait operation fails.
+        if(p <= 0 || p >= NPROCS || p == current->p_pid || proc_array[p].p_state == P_EMPTY) current->p_registers.reg_eax = -1;
+        //If the aimed process has exited and is zombie, recycle it for later reuse
+        else if (proc_array[p].p_state == P_ZOMBIE) {
+        	current->p_registers.reg_eax = proc_array[p].p_exit_status;
+        	proc_array[p].p_state = P_EMPTY;
+       	} else {
+       		//If the process is running, set its waiting pid to aimed pid and block the process as required.
+                current->waiting_pid = p;
+                current->p_state = P_BLOCKED;
+        }
+        schedule();
+
+Response for Extra-Credit Exercise 5:
+	
+	void start(void) {
+	    int x = 10;  /* note that local variable x lives on the stack */
+
+	    //get the address of x in parent process's stack, using volatile pointer
+	    //because the pointer will be used by other process
+	    int * volatile ptrx = &x;
+	    pid_t p = sys_fork();
+
+	    if (p == 0) {
+	    	//Inside child process, get the address of parent's x and change x's value
+            *ptrx = 11;
+            sys_exit(-1);
+	    } else if (p > 0)
+	        sys_wait(p); // assume blocking implementation
+	    //right parent process has been influenced by child process. value of x is set by child process, 
+	    //which indicates that MiniOS is not robust in its multiprocess design.
+	    app_printf("%d", x);
+	    sys_exit(0);
+	}
+
+Response for Extra-Credit Exercise 6:
+	
 
 
 
