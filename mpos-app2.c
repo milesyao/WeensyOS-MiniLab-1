@@ -30,10 +30,8 @@ start(void)
 			p = sys_fork();
 			if (p == 0)
 				run_child();
-			else if (p > 0){
-//				app_printf("%d,%d",p,n_started);
+			else if (p > 0)
 				n_started++;
-				}
 			else
 				break;
 		}
@@ -63,12 +61,6 @@ run_child(void)
 				   space, so this change to 'counter' will be
 				   visible to all processes. */
 
-	pid_t curpid = sys_getpid();
-	
-	if(curpid % 2==0) {
-		int i=3;
-		for(;i<NPROCS; i += 2) sys_kill(i);
-	}
 	app_printf("Process %d lives, counter %d!\n",
 		   sys_getpid(), input_counter);
 	sys_exit(input_counter);

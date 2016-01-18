@@ -108,6 +108,13 @@ in file mpos-kern.c:
         }
         schedule();
 
+
+
+Extra credit exercises:
+
+**************
+For extra-credit exercise 5, 6, 7, I created test codes named mpos-app-extra5.c, mpos-app-extra6.c, mpos-app2-extra7.c. Please replace corresponding mpos-app.c or mpos-app2.c with them and run bochs to see behaviors. 
+**************
 Response for Extra-Credit Exercise 5:
 	
 	void start(void) {
@@ -132,11 +139,150 @@ Response for Extra-Credit Exercise 5:
 
 Response for Extra-Credit Exercise 6:
 	
+    In mpos.h:
+    #define INT_SYS_NEWTHREAD   53
 
+    In mpos-app.h:
+    //define system call
+    static inline pid_t
+    sys_newthread(void (*start_function)(void)) 
+    {
+        pid_t pid;  
+        asm volatile("int %1\n"
+                 : "=a" (pid)
+                 : "i" (INT_SYS_NEWTHREAD),
+                   "a" (start_function)
+                 : "cc", "memory");
+        return pid;
 
+    }
+
+    In mpos-kern.c:
+    //implement system call
+    case INT_SYS_NEWTHREAD:
+    current->p_registers.reg_eax = new_thread();
+    run(current);
+....
+    
+    static pid_t
+    new_thread() 
+    {
+        int i;
+        //looking for available process slot
+        for(i=1; i<NPROCS; i++) {
+            if(proc_array[i].p_state == P_EMPTY) break;     
+        }
+        if(i==NPROCS) return -1;
+        uint32_t aim_stk_top;
+        aim_stk_top = PROC1_STACK_ADDR + PROC_STACK_SIZE * i;
+        //set child process as runnable
+        proc_array[i].p_state = P_RUNNABLE;
+        proc_array[i].p_registers = current->p_registers;
+        //set instruction pointer to the aimed functions entry address
+        proc_array[i].p_registers.reg_eip = current->p_registers.reg_eax;
+        //move stack pointer to the top so that we can regard stack as cleaned.
+        proc_array[i].p_registers.reg_esp = aim_stk_top;
+        return proc_array[i].p_pid;
+    }
+
+    Test code, replace mpos-app.c:
+
+    //As expected, new process will jump into this function and print "HOHOHOHOHOHOHOHO..."
+    void start_test(void) {    
+    app_printf("About to start a new thread...\n");
+    app_printf("HOHOHOHOHOHOHHOHO...\n");
+    sys_exit(0);
+
+    }
+
+    void run_child(void);
+
+    void
+    start(void)
+    {
+        pid_t p;
+        int status;
+        app_printf("Main process %d!\n", sys_getpid());
+        p = sys_newthread(&start_test);
+        status = sys_wait(p);
+        app_printf("Child thread %d exited with status %d!\n", p, status);
+        sys_exit(0);
+    }
+
+Response for Extra-Credit Exercise 7:
+    In mpos.h:
+    #define INT_SYS_KILL        54
+
+    In mpos-app.h:
+    //define system call
+    static inline int
+    sys_kill(pid_t pid)  
+    {
+        int retval;
+        asm volatile("int %1\n"
+                 : "=a" (retval)
+                 : "i" (INT_SYS_KILL),
+                   "a" (pid)
+                 : "cc", "memory");
+        return retval;
+    }
+
+    In mpos-kern.c:
+    //Implement system call
+        case INT_SYS_KILL:{
+        pid_t aim = current->p_registers.reg_eax;
+        //If the aimed process is out of scope or no need to kill (empty or zombie), sys_kill() returns -1 indicating operation fails
+        if(aim < 1 || aim >= NPROCS || proc_array[aim].p_state == P_EMPTY || proc_array[aim].p_state == P_ZOMBIE) {
+            current->p_registers.reg_eax = -1;
+        } else {
+        //Begin killing. Looking for the processes that are waiting for aimed process and unblock them similar to SYS_EXIT
+            int i;
+            for(i=1; i<NPROCS; i++) {
+                if(proc_array[i].waiting_pid == proc_array[aim].p_pid) {
+                    proc_array[i].p_state = P_RUNNABLE;
+                    proc_array[i].p_registers.reg_eax = -1;
+                    proc_array[i].waiting_pid =0;
+                }
+            }
+        //assume processes killed have exit status -1
+            proc_array[aim].p_exit_status = -1;
+            proc_array[aim].p_state = P_ZOMBIE;  
+        //ZOMBIE should not wait for any other process
+            proc_array[aim].waiting_pid = 0;
+        //sys_kill successfully executed so return 0
+            current->p_registers.reg_eax = 0;
+        }
+        run(current);   
+    }
+
+    Test code, replace mpos-app2.c:
+    void
+    run_child(void)
+    {
+        ....
+        pid_t curpid = sys_getpid();
+        
+        //if current pid is even, then kill all other processes with odd pid
+        if(curpid % 2==0) {
+            int i=3;
+            for(;i<NPROCS; i += 2) sys_kill(i);
+        }
+        app_printf("Process %d lives, counter %d!\n",
+               sys_getpid(), input_counter);
+        sys_exit(input_counter);
+    }
 
 Anything else you'd like us to know:
+    In implementing exercise 2, I once forgot to set %esp of the child process, which caused some confusion. 
+
+    In implementing exercise 3, I have to scan all processes to find the ones that are waiting for current process. This might be a preformance issue when number of processes becomes enormous. 
+
+    In implementing exercise 4, I recycle zombie process both in SYS_EXIT and SYS_WAIT. SYS_EXIT recycles waiting processes, SYS_WAIT recycles the process that has been zombie when sys_wait() is called.
+
+    In implementing exercise 6, I once reseted all registers of child process, which causes shutdown of bochs. From the usage of segments_init() and special_registers_init(current) in mpos-kern.c I learned, there are certain system reserved registers that we should maintain all the time.
+
+    In implementing exercise 7, the behavior of mpos-app2.c caused some confusion to us. It seems program will try to fork in a greedy way, filling all process slots, and then it will try to run from its first child. Later we understood that it's because WeensyOS uses cooperative multitasking. In the while loop containing fork, there are no system calls. So the scheduling function will not be triggered and current process maintains the same until all the process slots are filled up and we jumped out of while loop and hit sys_wait. 
 
 
 
-Extra credit exercises:
+
