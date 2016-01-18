@@ -279,6 +279,8 @@ Anything else you'd like us to know:
 
     In implementing exercise 4, I recycle zombie process both in SYS_EXIT and SYS_WAIT. SYS_EXIT recycles waiting processes, SYS_WAIT recycles the process that has been zombie when sys_wait() is called.
 
+    For exercise 5, just be care of usage of “volatile”, then this problem is trivial.
+
     In implementing exercise 6, I once reseted all registers of child process, which causes shutdown of bochs. From the usage of segments_init() and special_registers_init(current) in mpos-kern.c I learned, there are certain system reserved registers that we should maintain all the time.
 
     In implementing exercise 7, the behavior of mpos-app2.c caused some confusion to us. It seems program will try to fork in a greedy way, filling all process slots, and then it will try to run from its first child. Later we understood that it's because WeensyOS uses cooperative multitasking. In the while loop containing fork, there are no system calls. So the scheduling function will not be triggered and current process maintains the same until all the process slots are filled up and we jumped out of while loop and hit sys_wait. 
